@@ -230,6 +230,16 @@ def _search_one_collection(
         return []
 
 
+def _dedupe_key(r: dict) -> str:
+    """Pick the most specific identifier we have for a result, in priority order."""
+    return (
+        r.get("s3_key")
+        or r.get("image_path")
+        or r.get("id")
+        or ""
+    )
+
+
 def search_vectors(
     client: QdrantClient,
     query_vec: np.ndarray,
@@ -237,28 +247,45 @@ def search_vectors(
     filters: dict | None = None,
 ) -> list[dict]:
     """
-    Query ALL collections in QDRANT_COLLECTIONS, merge results, and return
-    the top-n sorted by descending CLIP score.
+    Query ALL collections in QDRANT_COLLECTIONS, merge results, dedupe by
+    s3_key/image_path, and return the top-n sorted by descending CLIP score.
 
-    Each result dict includes a 'collection' field so you can see which
-    database each item came from.
+    The collection has duplicate points for some images (same s3_key, different
+    point IDs). We overfetch and collapse so the user gets top_n *unique* items.
     """
     qdrant_filter = _build_qdrant_filter(filters)
 
     if filters:
         print(f"[INFO] Applying filters: {filters}")
 
+    # Overfetch: 5x cushion handles up to 5 dupes per item before we run dry
+    overfetch = max(top_n * 5, 50)
+
     all_results = []
     for col in QDRANT_COLLECTIONS:
-        hits = _search_one_collection(client, col, query_vec, top_n, qdrant_filter)
+        hits = _search_one_collection(client, col, query_vec, overfetch, qdrant_filter)
         print(f"[INFO] '{col}': {len(hits)} hits")
         all_results.extend(hits)
 
-    # Merge and re-sort across collections
+    # Sort by score, then dedupe keeping highest-scoring entry per key
     all_results.sort(key=lambda x: x["clip_score"], reverse=True)
 
-    # Assign final ranks
-    for rank, r in enumerate(all_results[:top_n], start=1):
+    seen: set[str] = set()
+    deduped: list[dict] = []
+    for r in all_results:
+        key = _dedupe_key(r)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(r)
+        if len(deduped) >= top_n:
+            break
+
+    dropped = len(all_results) - len(deduped)
+    if dropped > 0:
+        print(f"[INFO] Deduped {dropped} duplicate hits ({len(deduped)} unique returned)")
+
+    for rank, r in enumerate(deduped, start=1):
         r["rank"] = rank
 
-    return all_results[:top_n]
+    return deduped

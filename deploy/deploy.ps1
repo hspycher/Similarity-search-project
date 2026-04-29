@@ -119,11 +119,37 @@ if ($keyExists) {
         Remove-Item -Force -LiteralPath $pemPath -ErrorAction SilentlyContinue
     }
 
-    aws ec2 create-key-pair `
+    # Capture key material, then ALWAYS reformat to canonical PEM:
+    # AWS CLI on Windows can return PEMs with no newlines, escaped \n, or CRLF
+    # depending on locale. Reformatting from raw base64 dodges all three.
+    $keyMaterial = aws ec2 create-key-pair `
         --region $Region `
         --key-name $KeyName `
         --query 'KeyMaterial' `
-        --output text | Out-File -FilePath $pemPath -Encoding ascii -NoNewline
+        --output text
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($keyMaterial)) {
+        Throw-Err "create-key-pair returned no key material"
+    }
+    $keyMaterial = ($keyMaterial -join "`n") `
+        -replace '\\n', "`n" `
+        -replace "`r", ''
+
+    # Pull out body between BEGIN/END markers, re-wrap at 64 chars
+    $re = '-{5}BEGIN ([A-Z 0-9]+?)-{5}(.+?)-{5}END \1-{5}'
+    $m  = [regex]::Match($keyMaterial, $re,
+            [System.Text.RegularExpressions.RegexOptions]::Singleline)
+    if (-not $m.Success) {
+        Throw-Err "Could not parse PEM markers in create-key-pair output"
+    }
+    $pemType = $m.Groups[1].Value
+    $pemBody = ($m.Groups[2].Value -replace '\s', '')
+    $wrapped = ""
+    for ($j = 0; $j -lt $pemBody.Length; $j += 64) {
+        $len = [Math]::Min(64, $pemBody.Length - $j)
+        $wrapped += $pemBody.Substring($j, $len) + "`n"
+    }
+    $pemFinal = "-----BEGIN $pemType-----`n$wrapped-----END $pemType-----`n"
+    [System.IO.File]::WriteAllText($pemPath, $pemFinal, [System.Text.ASCIIEncoding]::new())
 
     # OpenSSH on Windows refuses to use a key world-readable by other users.
     # Strip inheritance and grant read-only to the current user.

@@ -1,6 +1,6 @@
 REGION=us-west-2
-INSTANCE_ID=i-063dcbe5c90353b35
-SG_ID=sg-0d51f475f53a20262
+INSTANCE_ID=i-05ad2a8aa7c9fe89c
+SG_ID=sg-0a8b9faf798c8881e
 SG_NAME=fashion-search-sg
 KEY_NAME=fashion-search-key
-PUBLIC_IP=34.208.73.58
+PUBLIC_IP=16.144.31.99
