@@ -15,3 +15,6 @@ venv/
 
 # Jupyter
 .ipynb_checkpoints/
+# Don't ever commit AWS private keys or local deploy state
+deploy/*.pem
+deploy/deploy.state
