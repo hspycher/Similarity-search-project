@@ -141,6 +141,39 @@ def _build_qdrant_filter(filters: dict | None) -> Filter | None:
     return Filter(must=conditions)
 
 
+def _build_image_url(p: dict) -> str:
+    """
+    Resolve a payload to a renderable image source. Returns one of:
+      - an HTTP(S) URL  (Streamlit's st.image can fetch these directly)
+      - a local file path
+      - "" if nothing usable was found
+    """
+    # 1. Explicit URL fields win
+    for key in ("image_url", "img_url", "thumbnail_url"):
+        v = p.get(key)
+        if v and isinstance(v, str) and v.startswith(("http://", "https://")):
+            return v
+
+    # 2. Existing image_path may already be a URL
+    ip = p.get("image_path", "")
+    if ip.startswith(("http://", "https://")):
+        return ip
+
+    # 3. Build an S3 HTTPS URL from bucket + key (deepfashion_items pattern)
+    bucket = p.get("s3_bucket") or p.get("bucket")
+    key    = p.get("s3_key")    or p.get("key") or (ip if ip else None)
+    if bucket and key:
+        # Region-less virtual-hosted style works for buckets in us-east-1
+        # and as a redirect for other regions. Use path-style if region known.
+        region = p.get("s3_region")
+        host = (f"{bucket}.s3.{region}.amazonaws.com"
+                if region else f"{bucket}.s3.amazonaws.com")
+        return f"https://{host}/{key.lstrip('/')}"
+
+    # 4. Otherwise assume image_path is a local filesystem path (Myntra dataset)
+    return ip
+
+
 def _normalise_payload(hit, collection_name: str) -> dict:
     """
     Normalise a Qdrant ScoredPoint into our standard result schema.
@@ -155,8 +188,10 @@ def _normalise_payload(hit, collection_name: str) -> dict:
         "name":           p.get("name", p.get("s3_key", "")),   # deepfashion fallback
         "brand":          p.get("brand", ""),
         "price":          p.get("price", 0.0),
-        "url":            p.get("url", p.get("s3_bucket", "")),
-        "image_path":     p.get("image_path", p.get("s3_key", "")),
+        "url":            p.get("url", ""),                     # product URL only
+        "image_path":     _build_image_url(p),                   # http(s) OR local path
+        "s3_bucket":      p.get("s3_bucket", p.get("bucket", "")),
+        "s3_key":         p.get("s3_key",    p.get("key",    "")),
         "gender":         p.get("gender", ""),
         "masterCategory": p.get("masterCategory", ""),
         "subCategory":    p.get("subCategory", ""),

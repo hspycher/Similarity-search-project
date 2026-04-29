@@ -136,10 +136,19 @@ if results:
     for i, r in enumerate(results):
         col = cols[i % 5]
         with col:
+            img_src = r.get("image_path", "")
             try:
-                col.image(Image.open(r["image_path"]), use_container_width=True)
-            except Exception:
-                col.write("_(image unavailable)_")
+                if img_src.startswith(("http://", "https://")):
+                    # Let Streamlit fetch URLs directly (S3, CDNs, etc.)
+                    col.image(img_src, use_container_width=True)
+                elif img_src:
+                    col.image(Image.open(img_src), use_container_width=True)
+                else:
+                    col.write("_(no image source)_")
+            except Exception as e:
+                col.write(f"_(image unavailable)_")
+                col.caption(f"src: {img_src[:60]}")
+                col.caption(f"err: {str(e)[:80]}")
 
             col.markdown(f"**{r['name']}**")
 

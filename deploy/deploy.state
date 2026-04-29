@@ -1,0 +1,6 @@
+REGION=us-west-2
+INSTANCE_ID=i-063dcbe5c90353b35
+SG_ID=sg-0d51f475f53a20262
+SG_NAME=fashion-search-sg
+KEY_NAME=fashion-search-key
+PUBLIC_IP=34.208.73.58
